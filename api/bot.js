@@ -3,116 +3,110 @@ require('dotenv').config();
 const TelegramBot = require('node-telegram-bot-api');
 const { GoogleSpreadsheet } = require('google-spreadsheet');
 
-// ==================== 2. НАСТРОЙКА КЛИЕНТОВ ====================
+// ==================== 2. НАСТРОЙКА БОТА ====================
 const bot = new TelegramBot(process.env.BOT_TOKEN);
 
-// ==================== 3. ИНИЦИАЛИЗАЦИЯ GOOGLE SHEETS (v4.x) ====================
-let doc; // Объявим как переменную в области видимости модуля
+// ==================== 3. ИНИЦИАЛИЗАЦИЯ GOOGLE SHEETS ====================
+let doc = null;
+let sheet = null;
+let mailingSheet = null;
 
 async function initializeGoogleSheets() {
   try {
-    // Создаем новый экземпляр при каждом запросе
+    // 1. Создаем документ
     doc = new GoogleSpreadsheet(process.env.GOOGLE_SHEET_ID);
     
+    // 2. Аутентифицируемся
     await doc.useServiceAccountAuth({
       client_email: process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL,
       private_key: process.env.GOOGLE_PRIVATE_KEY.replace(/\\n/g, '\n'),
     });
     
+    // 3. Загружаем информацию
     await doc.loadInfo();
-    console.log(`✅ Google Sheets инициализирована: "${doc.title}"`);
+    console.log(`✅ Google Sheets: "${doc.title}"`);
+    
+    // 4. Получаем основной лист
+    sheet = doc.sheetsByIndex[0];
+    console.log(`✅ Основной лист: "${sheet.title}"`);
+    
+    // 5. Проверяем/создаем лист для подписчиков
+    if (doc.sheetsByIndex.length < 2) {
+      mailingSheet = await doc.addSheet({
+        title: 'Подписчики',
+        headerValues: ['Chat ID', 'Имя', 'Дата подписки', 'Статус', 'Дата отписки']
+      });
+      console.log('✅ Создан лист "Подписчики"');
+    } else {
+      mailingSheet = doc.sheetsByIndex[1];
+      console.log(`✅ Лист подписчиков: "${mailingSheet.title}"`);
+    }
+    
     return true;
   } catch (error) {
-    console.error('❌ Ошибка инициализации Google Sheets:', error.message);
+    console.error('❌ Ошибка Google Sheets:', error.message);
     return false;
   }
 }
 
-// ==================== 3. ФУНКЦИЯ ДЛЯ ЛОГИРОВАНИЯ ====================
+// ==================== 4. ФУНКЦИИ РАБОТЫ С ТАБЛИЦЕЙ ====================
 async function addLogToSheet(userName, userId, userMessage, botResponse) {
   try {
-    if (!doc) {
-      console.error('❌ Документ Google Sheets не инициализирован');
+    if (!sheet) {
+      console.error('❌ Лист не инициализирован');
       return false;
     }
-    console.log(`📝 Пытаюсь записать лог для ${userName}...`);
     
-    // 2. Получаем первый лист
-    const sheet = doc.sheetsByIndex[0];
-    console.log(`✅ Лист "${sheet.title}" получен`);
+    console.log(`📝 Запись лога для ${userName}...`);
     
-    // 3. Добавляем строку
-    const rowData = {
+    await sheet.addRow({
       Timestamp: new Date().toISOString(),
       'Chat ID': userId,
       'User Name': userName || `User_${userId}`,
       'User Message': userMessage || '(не текстовое сообщение)',
       'Bot Response': botResponse || '(нет ответа)',
-    };
+    });
     
-    await sheet.addRow(rowData);
-    console.log('✅ Лог успешно записан в Google Таблицу!');
+    console.log('✅ Лог записан!');
     return true;
-    
   } catch (error) {
-    console.error('❌ Ошибка при записи лога:');
-    console.error('Сообщение:', error.message);
-    
-    if (error.response) {
-      console.error('HTTP статус:', error.response.status);
-      console.error('Тело ошибки:', error.response.data);
-    }
-    
+    console.error('❌ Ошибка записи лога:', error.message);
     return false;
   }
 }
 
-// Функция для добавления/обновления подписчика в отдельном листе (лист №2)
 async function updateMailingList(chatId, userName, status = 'активен', unsubscribeDate = null) {
   try {
-    if (!doc) {
-      console.error('❌ Документ Google Sheets не инициализирован');
+    if (!mailingSheet) {
+      console.error('❌ Лист подписчиков не инициализирован');
       return false;
     }
     
-    // Получаем или создаем лист "Подписчики"
-    let mailingSheet;
-    if (doc.sheetCount < 2) {
-      mailingSheet = await doc.addSheet({ 
-        title: 'Подписчики',
-        headerValues: ['Chat ID', 'Имя', 'Дата подписки', 'Статус', 'Дата отписки']
-      });
-      console.log('✅ Создан новый лист "Подписчики"');
-    } else {
-      mailingSheet = doc.sheetsByIndex[1];
-    }
-    
-    // Загружаем все строки для поиска существующего пользователя
-    await mailingSheet.loadCells();
+    // Получаем все строки
     const rows = await mailingSheet.getRows();
     
-    // Ищем пользователя по Chat ID
+    // Ищем пользователя
     let existingRow = null;
-    for (let i = 0; i < rows.length; i++) {
-      if (rows[i].get('Chat ID') == chatId) {
-        existingRow = rows[i];
+    for (const row of rows) {
+      if (row['Chat ID'] == chatId) {
+        existingRow = row;
         break;
       }
     }
     
     if (existingRow) {
       // Обновляем существующую запись
-      existingRow.set('Имя', userName);
-      existingRow.set('Статус', status);
+      existingRow['Имя'] = userName;
+      existingRow['Статус'] = status;
       if (unsubscribeDate) {
-        existingRow.set('Дата отписки', unsubscribeDate);
+        existingRow['Дата отписки'] = unsubscribeDate;
       } else if (status === 'активен') {
-        existingRow.set('Дата отписки', '');
+        existingRow['Дата отписки'] = '';
       }
       await existingRow.save();
-      console.log(`✅ Статус пользователя ${userName} обновлен на "${status}"`);
+      console.log(`✅ Статус ${userName} обновлен на "${status}"`);
     } else {
-      // Добавляем новую запись (только для активных подписок)
+      // Добавляем новую запись
       if (status === 'активен') {
         await mailingSheet.addRow({
           'Chat ID': chatId,
@@ -127,12 +121,11 @@ async function updateMailingList(chatId, userName, status = 'активен', un
     
     return true;
   } catch (error) {
-    console.error('❌ Ошибка при работе со списком рассылки:', error.message);
+    console.error('❌ Ошибка работы со списком рассылки:', error.message);
     return false;
   }
 }
 
-// Функция для отписки от рассылки (меняем статус на "отказ")
 async function removeFromMailingList(chatId, userName) {
   try {
     const unsubscribeDate = new Date().toISOString();
@@ -141,61 +134,49 @@ async function removeFromMailingList(chatId, userName) {
     if (success) {
       console.log(`✅ ${userName} отписан от рассылки`);
       return true;
-    } else {
-      console.log(`❌ Не удалось обновить статус для ${userName}`);
-      return false;
     }
+    return false;
   } catch (error) {
     console.error('❌ Ошибка в removeFromMailingList:', error.message);
     return false;
   }
 }
 
-// ==================== 5. ОБРАБОТКА СООБЩЕНИЙ ====================
-// Обработчик команды /start с кнопкой согласия
+// ==================== 5. ОБРАБОТЧИКИ СОБЫТИЙ БОТА ====================
 bot.onText(/\/start/, async (msg) => {
   const chatId = msg.chat.id;
   const userName = msg.from.first_name || 'Пользователь';
   
-  // Текст приветствия
   const welcomeText = `Привет, ${userName}!\n\nЭтот бот предназначен для отправки важных уведомлений и информации. Для того чтобы начать получать сообщения, пожалуйста, дайте свое согласие на рассылку.`;
   
-  // Создаем inline-клавиатуру с кнопкой
   const consentKeyboard = {
-    inline_keyboard: [
-      [
-        {
-          text: '✅ Я соглашаюсь на получение рассылки',
-          callback_data: 'consent_given' // Этот идентификатор придет при нажатии
-        }
-      ]
-    ]
+    inline_keyboard: [[{
+      text: '✅ Я соглашаюсь на получение рассылки',
+      callback_data: 'consent_given'
+    }]]
   };
   
   try {
-    // Отправляем сообщение с кнопкой
     await bot.sendMessage(chatId, welcomeText, {
       reply_markup: consentKeyboard,
       parse_mode: 'HTML'
     });
     
-    // Логируем отправку приветственного сообщения
-    await addLogToSheet(userName, chatId, '/start', 'Отправлено приветствие с кнопкой согласия');
+    if (sheet) {
+      await addLogToSheet(userName, chatId, '/start', 'Отправлено приветствие с кнопкой согласия');
+    }
   } catch (error) {
     console.error('Ошибка в обработке /start:', error.message);
   }
 });
 
-// Обработчик команды отписки /unsubscribe
 bot.onText(/\/unsubscribe/, async (msg) => {
   const chatId = msg.chat.id;
   const userName = msg.from.first_name || 'Пользователь';
   
   try {
-    // 1. Пытаемся обновить статус в списке рассылки
     const unsubscribed = await removeFromMailingList(chatId, userName);
     
-    // 2. Формируем ответ в зависимости от результата
     let responseText;
     if (unsubscribed) {
       responseText = `${userName}, вы отписались от рассылки.\n\n✅ Ваш статус изменен на "отказ".\n\nЧтобы снова подписаться, используйте команду /start.`;
@@ -203,25 +184,18 @@ bot.onText(/\/unsubscribe/, async (msg) => {
       responseText = `${userName}, вы не найдены в списке подписчиков.\n\nЕсли хотите подписаться, используйте команду /start.`;
     }
     
-    // 3. Отправляем сообщение пользователю
     await bot.sendMessage(chatId, responseText);
     
-    // 4. Логируем действие
-    await addLogToSheet(
-      userName, 
-      chatId, 
-      '/unsubscribe', 
-      unsubscribed ? 'Пользователь отписался от рассылки' : 'Попытка отписки, пользователь не найден в списке'
-    );
-    
+    if (sheet) {
+      await addLogToSheet(
+        userName, 
+        chatId, 
+        '/unsubscribe', 
+        unsubscribed ? 'Пользователь отписался от рассылки' : 'Попытка отписки, пользователь не найден'
+      );
+    }
   } catch (error) {
     console.error('Ошибка в обработке /unsubscribe:', error.message);
-    // Даже если что-то пошло не так, отвечаем пользователю
-    try {
-      await bot.sendMessage(chatId, 'Произошла ошибка при обработке запроса. Пожалуйста, попробуйте позже.');
-    } catch (sendError) {
-      console.error('Не удалось отправить сообщение об ошибке:', sendError.message);
-    }
   }
 });
 
@@ -235,75 +209,70 @@ bot.on('message', async (msg) => {
   try {
     const botResponse = `Эхо: ${userMessage}`;
     await bot.sendMessage(chatId, botResponse);
-    await addLogToSheet(userName, chatId, userMessage, botResponse);
+    
+    if (sheet) {
+      await addLogToSheet(userName, chatId, userMessage, botResponse);
+    }
   } catch (error) {
     console.error('Ошибка в обработке сообщения:', error.message);
-    try {
-      await bot.sendMessage(chatId, 'Произошла ошибка при обработке сообщения.');
-    } catch (sendError) {
-      console.error('Не удалось отправить сообщение об ошибке:', sendError.message);
-    }
   }
 });
 
-// Обработка нажатий на inline-кнопки (кнопки согласия)
 bot.on('callback_query', async (callbackQuery) => {
   const msg = callbackQuery.message;
   const chatId = msg.chat.id;
   const user = callbackQuery.from;
   const userName = user.first_name || `User_${user.id}`;
-  const data = callbackQuery.data; // Здесь будет 'consent_given'
+  const data = callbackQuery.data;
   
   try {
-    // Проверяем, какая кнопка была нажата
     if (data === 'consent_given') {
-      // 1. Подтверждаем получение callback (убирает "часики" на кнопке)
       await bot.answerCallbackQuery(callbackQuery.id, {
         text: 'Спасибо! Ваше согласие сохранено.',
         show_alert: false
       });
       
-      // 2. Обновляем сообщение, убирая кнопку и показывая подтверждение
       const confirmedText = `Отлично, ${userName}!\n\n✅ Ваше согласие на получение рассылки сохранено.\n\nТеперь вы будете получать важные уведомления. Если захотите отписаться, используйте команду /unsubscribe.`;
       
       await bot.editMessageText(confirmedText, {
         chat_id: chatId,
         message_id: msg.message_id,
         parse_mode: 'HTML',
-        reply_markup: { inline_keyboard: [] } // Убираем клавиатуру
+        reply_markup: { inline_keyboard: [] }
       });
       
-      // 3. Логируем факт получения согласия В ОТДЕЛЬНЫЙ ЛИСТ ИЛИ БАЗУ
-      // Это критически важные данные, которые нельзя терять
-      await addLogToSheet(userName, chatId, 'Нажатие кнопки согласия', 'Пользователь дал согласие на рассылку');
-      
-      // 4. Здесь можно сохранить chatId в отдельный список рассылки
-      // Например, в отдельный лист Google Таблицы или базу данных
-      await updateMailingList(chatId, userName, 'активен');
+      if (sheet) {
+        await addLogToSheet(userName, chatId, 'Нажатие кнопки согласия', 'Пользователь дал согласие на рассылку');
+        await updateMailingList(chatId, userName, 'активен');
+      }
     }
   } catch (error) {
     console.error('Ошибка в обработке callback_query:', error.message);
   }
 });
 
-// ==================== 4. ОСНОВНОЙ ОБРАБОТЧИК VERCEL ====================
+// ==================== 6. ОСНОВНОЙ ОБРАБОТЧИК VERCEL ====================
 module.exports = async (req, res) => {
-  console.log(`📨 Получен ${req.method} запрос`);
+  console.log(`📨 ${req.method} запрос от Telegram`);
   
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method Not Allowed' });
   }
   
   try {
-    // Инициализируем Google Sheets при каждом запросе
-    await initializeGoogleSheets();
+    // Инициализируем Google Sheets
+    const googleReady = await initializeGoogleSheets();
+    if (!googleReady) {
+      console.log('⚠️  Google Sheets не доступна, бот будет работать без логирования');
+    }
     
+    // Обрабатываем обновление от Telegram
     const update = req.body;
     await bot.processUpdate(update);
     
     return res.status(200).json({ ok: true });
   } catch (error) {
-    console.error('❌ Ошибка:', error.message);
-    return res.status(200).json({ ok: false });
+    console.error('❌ Ошибка обработки:', error.message);
+    return res.status(200).json({ ok: false, error: error.message });
   }
 };
