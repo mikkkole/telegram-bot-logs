@@ -144,6 +144,7 @@ async function removeFromMailingList(chatId, userName) {
 
 // ==================== 5. ОБРАБОТЧИКИ СОБЫТИЙ БОТА ====================
 bot.onText(/\/start/, async (msg) => {
+  console.log(`🚀 Обработчик /start вызван для chatId: ${msg.chat.id}`);
   const chatId = msg.chat.id;
   const userName = msg.from.first_name || 'Пользователь';
   
@@ -219,6 +220,7 @@ bot.on('message', async (msg) => {
 });
 
 bot.on('callback_query', async (callbackQuery) => {
+  console.log(`🔘 Callback получен: ${callbackQuery.data} для chatId: ${callbackQuery.message.chat.id}`);
   const msg = callbackQuery.message;
   const chatId = msg.chat.id;
   const user = callbackQuery.from;
@@ -254,6 +256,32 @@ bot.on('callback_query', async (callbackQuery) => {
 // ==================== 6. ОСНОВНОЙ ОБРАБОТЧИК VERCEL ====================
 module.exports = async (req, res) => {
   console.log(`📨 ${req.method} запрос от Telegram`);
+  console.log(`📦 Body exists: ${!!req.body}`);
+  
+  // Декодируем тело запроса, если оно пришло в сыром виде
+  let update;
+  try {
+    if (typeof req.body === 'string') {
+      console.log('🔄 Тело запроса - строка, парсим JSON...');
+      update = JSON.parse(req.body);
+    } else if (req.body && typeof req.body === 'object') {
+      console.log('✅ Тело запроса уже объект');
+      update = req.body;
+    } else {
+      console.log('❌ Тело запроса пустое или в неверном формате');
+      return res.status(200).json({ ok: false, error: 'Invalid request body' });
+    }
+  } catch (error) {
+    console.error('❌ Ошибка парсинга тела запроса:', error.message);
+    return res.status(200).json({ ok: false, error: 'JSON parse error' });
+  }
+  
+  console.log(`📊 Тип обновления: ${update.message ? 'message' : update.callback_query ? 'callback' : 'unknown'}`);
+
+  // Логируем первые 200 символов тела запроса
+  if (req.body) {
+    console.log('📋 Body preview:', JSON.stringify(req.body).substring(0, 200));
+  }
   
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method Not Allowed' });
