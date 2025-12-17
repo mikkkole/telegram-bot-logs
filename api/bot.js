@@ -2,34 +2,40 @@
 require('dotenv').config();
 const TelegramBot = require('node-telegram-bot-api');
 const { GoogleSpreadsheet } = require('google-spreadsheet');
-const { JWT } = require('google-auth-library');
 
 // ==================== 2. НАСТРОЙКА КЛИЕНТОВ ====================
 const bot = new TelegramBot(process.env.BOT_TOKEN);
 
-// 🔑 Очистка приватного ключа: замена \\n → \n и удаление лишних символов
-const cleanPrivateKey = process.env.GOOGLE_PRIVATE_KEY
-  .replace(/\\n/g, '\n')
-  .trim();
+// ==================== 3. ИНИЦИАЛИЗАЦИЯ GOOGLE SHEETS (v4.x) ====================
+let doc; // Объявим как переменную в области видимости модуля
 
-// 🛡️ Создание JWT-клиента для авторизации (требуется в v5.0.2)
-const jwtClient = new JWT({
-  email: process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL,
-  key: cleanPrivateKey,
-  scopes: ['https://www.googleapis.com/auth/spreadsheets'], // ← без пробелов!
-});
-
-// 📊 Инициализация Google Таблицы с передачей JWT-клиента
-const doc = new GoogleSpreadsheet(process.env.GOOGLE_SHEET_ID, jwtClient);
+async function initializeGoogleSheets() {
+  try {
+    // Создаем новый экземпляр при каждом запросе
+    doc = new GoogleSpreadsheet(process.env.GOOGLE_SHEET_ID);
+    
+    await doc.useServiceAccountAuth({
+      client_email: process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL,
+      private_key: process.env.GOOGLE_PRIVATE_KEY.replace(/\\n/g, '\n'),
+    });
+    
+    await doc.loadInfo();
+    console.log(`✅ Google Sheets инициализирована: "${doc.title}"`);
+    return true;
+  } catch (error) {
+    console.error('❌ Ошибка инициализации Google Sheets:', error.message);
+    return false;
+  }
+}
 
 // ==================== 3. ФУНКЦИЯ ДЛЯ ЛОГИРОВАНИЯ ====================
 async function addLogToSheet(userName, userId, userMessage, botResponse) {
   try {
+    if (!doc) {
+      console.error('❌ Документ Google Sheets не инициализирован');
+      return false;
+    }
     console.log(`📝 Пытаюсь записать лог для ${userName}...`);
-    
-    // 1. Загружаем информацию о документе (если ещё не загружена)
-    await doc.loadInfo();
-    console.log(`✅ Таблица "${doc.title}" загружена`);
     
     // 2. Получаем первый лист
     const sheet = doc.sheetsByIndex[0];
@@ -61,42 +67,13 @@ async function addLogToSheet(userName, userId, userMessage, botResponse) {
   }
 }
 
-// Функция для добавления подписчика в отдельный лист (лист №2)
-async function addToMailingList(chatId, userName) {
-  try {
-    // Загружаем информацию о документе
-    await doc.loadInfo();
-    
-    // Получаем второй лист (индекс 1) или создаем его
-    let mailingSheet;
-    if (doc.sheetCount < 2) {
-      mailingSheet = await doc.addSheet({ 
-        title: 'Подписчики',
-        headerValues: ['Chat ID', 'Имя', 'Дата подписки', 'Статус']
-      });
-    } else {
-      mailingSheet = doc.sheetsByIndex[1];
-    }
-    
-    // Добавляем запись о подписчике
-    await mailingSheet.addRow({
-      'Chat ID': chatId,
-      'Имя': userName,
-      'Дата подписки': new Date().toISOString(),
-      'Статус': 'активен'
-    });
-    
-    console.log(`✅ ${userName} добавлен в список рассылки`);
-  } catch (error) {
-    console.error('❌ Ошибка при добавлении в список рассылки:', error.message);
-  }
-}
-
 // Функция для добавления/обновления подписчика в отдельном листе (лист №2)
 async function updateMailingList(chatId, userName, status = 'активен', unsubscribeDate = null) {
   try {
-    // Загружаем информацию о документе
-    await doc.loadInfo();
+    if (!doc) {
+      console.error('❌ Документ Google Sheets не инициализирован');
+      return false;
+    }
     
     // Получаем или создаем лист "Подписчики"
     let mailingSheet;
@@ -170,38 +147,6 @@ async function removeFromMailingList(chatId, userName) {
     }
   } catch (error) {
     console.error('❌ Ошибка в removeFromMailingList:', error.message);
-    return false;
-  }
-}
-
-// ==================== 4. ПРОВЕРКА ПОДКЛЮЧЕНИЯ ПРИ ЗАПУСКЕ ====================
-async function initializeBot() {
-  try {
-    console.log('🔧 Проверяю подключение к Google Таблице...');
-    
-    await doc.loadInfo();
-    console.log(`✅ Подключение успешно! Таблица: "${doc.title}"`);
-    
-    const sheet = doc.sheetsByIndex[0];
-    console.log(`✅ Рабочий лист: "${sheet.title}"`);
-    console.log(`✅ Размеры: ${sheet.rowCount} строк, ${sheet.columnCount} столбцов`);
-    
-    return true;
-  } catch (error) {
-    console.error('❌ Не удалось подключиться к Google Таблице:');
-    console.error('Ошибка:', error.message);
-    
-    if (error.message.includes('invalid_grant') || error.message.includes('Invalid credentials')) {
-      console.error('\n🔑 ВОЗМОЖНЫЕ ПРИЧИНЫ:');
-      console.error('1. Неверный формат приватного ключа в .env');
-      console.error('2. Сервисный аккаунт не имеет доступа к таблице');
-      console.error('3. Sheets API не включён в Google Cloud');
-      console.error('\n📋 РЕКОМЕНДАЦИИ:');
-      console.error('- Убедитесь, что ключ в .env в одной строке с \\n');
-      console.error('- Поделитесь таблицей с email сервисного аккаунта');
-      console.error('- Включите Google Sheets API в Google Cloud Console');
-    }
-    
     return false;
   }
 }
@@ -341,22 +286,24 @@ bot.on('callback_query', async (callbackQuery) => {
   }
 });
 
-// ЭКСПОРТ функции-обработчика для Vercel
+// ==================== 4. ОСНОВНОЙ ОБРАБОТЧИК VERCEL ====================
 module.exports = async (req, res) => {
-  // 1. Проверяем, что запрос от Telegram (необязательно, но рекомендуется)
-  // if (req.method !== 'POST') return res.status(405).send('Method Not Allowed');
+  console.log(`📨 Получен ${req.method} запрос`);
+  
+  if (req.method !== 'POST') {
+    return res.status(405).json({ error: 'Method Not Allowed' });
+  }
   
   try {
-    // 2. Парсим тело запроса (обновление от Telegram)
-    const update = req.body;
+    // Инициализируем Google Sheets при каждом запросе
+    await initializeGoogleSheets();
     
-    // 3. Передаем обновление боту на обработку
+    const update = req.body;
     await bot.processUpdate(update);
     
-    // 4. Отвечаем Telegram, что всё OK
-    res.status(200).json({ ok: true });
+    return res.status(200).json({ ok: true });
   } catch (error) {
-    console.error('Ошибка в обработке запроса:', error);
-    res.status(500).json({ error: 'Internal Server Error' });
+    console.error('❌ Ошибка:', error.message);
+    return res.status(200).json({ ok: false });
   }
 };
