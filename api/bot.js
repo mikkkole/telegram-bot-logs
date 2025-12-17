@@ -4,7 +4,18 @@ const TelegramBot = require('node-telegram-bot-api');
 const { GoogleSpreadsheet } = require('google-spreadsheet');
 
 // ==================== 2. НАСТРОЙКА БОТА ====================
-const bot = new TelegramBot(process.env.BOT_TOKEN);
+const bot = new TelegramBot(process.env.BOT_TOKEN, {
+  webHook: {
+    port: 443,
+    autoOpen: false
+  },
+  onlyFirstMatch: true
+});
+
+// И добавьте после создания бота:
+if (process.env.VERCEL) {
+  bot.setWebHook(`https://${process.env.VERCEL_URL}/api/bot`);
+}
 
 // ==================== 3. ИНИЦИАЛИЗАЦИЯ GOOGLE SHEETS ====================
 let doc = null;
@@ -144,9 +155,10 @@ async function removeFromMailingList(chatId, userName) {
 
 // ==================== 5. ОБРАБОТЧИКИ СОБЫТИЙ БОТА ====================
 bot.onText(/\/start/, async (msg) => {
-  console.log(`🚀 Обработчик /start вызван для chatId: ${msg.chat.id}`);
   const chatId = msg.chat.id;
   const userName = msg.from.first_name || 'Пользователь';
+  
+  console.log(`🚀 /start: chatId=${chatId}, userName=${userName}`);
   
   const welcomeText = `Привет, ${userName}!\n\nЭтот бот предназначен для отправки важных уведомлений и информации. Для того чтобы начать получать сообщения, пожалуйста, дайте свое согласие на рассылку.`;
   
@@ -158,16 +170,27 @@ bot.onText(/\/start/, async (msg) => {
   };
   
   try {
-    await bot.sendMessage(chatId, welcomeText, {
+    console.log(`📤 Пытаюсь отправить сообщение в ${chatId}...`);
+    
+    // Пробуем отправить без клавиатуры
+    const testMessage = await bot.sendMessage(chatId, `Тест: ${userName}, бот жив!`);
+    console.log(`✅ Тестовое сообщение отправлено, ID: ${testMessage.message_id}`);
+    
+    // Потом с клавиатурой
+    const result = await bot.sendMessage(chatId, welcomeText, {
       reply_markup: consentKeyboard,
       parse_mode: 'HTML'
     });
     
+    console.log(`✅ Основное сообщение отправлено, ID: ${result.message_id}`);
+    
+    // Логируем
     if (sheet) {
       await addLogToSheet(userName, chatId, '/start', 'Отправлено приветствие с кнопкой согласия');
     }
   } catch (error) {
-    console.error('Ошибка в обработке /start:', error.message);
+    console.error('❌ Ошибка отправки сообщения:', error.message);
+    console.error('Детали ошибки:', error);
   }
 });
 
