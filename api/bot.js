@@ -172,25 +172,51 @@ bot.onText(/\/start/, async (msg) => {
   try {
     console.log(`📤 Пытаюсь отправить сообщение в ${chatId}...`);
     
-    // Пробуем отправить без клавиатуры
+    // 1. Тестовое сообщение (работает)
     const testMessage = await bot.sendMessage(chatId, `Тест: ${userName}, бот жив!`);
     console.log(`✅ Тестовое сообщение отправлено, ID: ${testMessage.message_id}`);
     
-    // Потом с клавиатурой
-    const result = await bot.sendMessage(chatId, welcomeText, {
-      reply_markup: consentKeyboard,
-      parse_mode: 'HTML'
-    });
+    // 2. Подготовка клавиатуры
+    console.log('🔧 Подготавливаю клавиатуру...');
+    const consentKeyboard = {
+      inline_keyboard: [[{
+        text: '✅ Я соглашаюсь на получение рассылки',
+        callback_data: 'consent_given'
+      }]]
+    };
     
-    console.log(`✅ Основное сообщение отправлено, ID: ${result.message_id}`);
+    console.log('🎹 Клавиатура:', JSON.stringify(consentKeyboard));
+    console.log('📝 Текст сообщения:', welcomeText.substring(0, 100) + '...');
+    
+    // 3. Пробуем отправить БЕЗ parse_mode
+    console.log('📤 Пытаюсь отправить основное сообщение...');
+    try {
+      const result = await bot.sendMessage(chatId, welcomeText, {
+        reply_markup: consentKeyboard
+        // УБЕРИТЕ parse_mode: 'HTML' на время теста
+      });
+      console.log(`✅ Основное сообщение отправлено, ID: ${result.message_id}`);
+    } catch (sendError) {
+      console.error('❌ Ошибка отправки основного сообщения:', sendError.message);
+      console.error('Детали ошибки:', sendError.response?.data || sendError);
+      
+      // Пробуем отправить без клавиатуры
+      console.log('🔄 Пробую отправить без клавиатуры...');
+      try {
+        const simpleResult = await bot.sendMessage(chatId, welcomeText);
+        console.log(`✅ Сообщение без клавиатуры отправлено, ID: ${simpleResult.message_id}`);
+      } catch (simpleError) {
+        console.error('❌ Ошибка даже без клавиатуры:', simpleError.message);
+      }
+    }
     
     // Логируем
     if (sheet) {
       await addLogToSheet(userName, chatId, '/start', 'Отправлено приветствие с кнопкой согласия');
     }
   } catch (error) {
-    console.error('❌ Ошибка отправки сообщения:', error.message);
-    console.error('Детали ошибки:', error);
+    console.error('❌ Общая ошибка в обработчике /start:', error.message);
+    console.error('Stack:', error.stack);
   }
 });
 
