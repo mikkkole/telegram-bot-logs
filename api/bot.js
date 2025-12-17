@@ -5,13 +5,7 @@ const { GoogleSpreadsheet } = require('google-spreadsheet');
 const { JWT } = require('google-auth-library');
 
 // ==================== 2. НАСТРОЙКА КЛИЕНТОВ ====================
-// Бот в режиме polling для локального тестирования
-const bot = new TelegramBot(process.env.BOT_TOKEN, { 
-  polling: { 
-    interval: 300,
-    autoStart: true 
-  } 
-});
+const bot = new TelegramBot(process.env.BOT_TOKEN);
 
 // 🔑 Очистка приватного ключа: замена \\n → \n и удаление лишних символов
 const cleanPrivateKey = process.env.GOOGLE_PRIVATE_KEY
@@ -347,29 +341,22 @@ bot.on('callback_query', async (callbackQuery) => {
   }
 });
 
-bot.on('polling_error', (error) => {
-  console.error('Ошибка polling:', error.code, '-', error.message);
-});
-
-// ==================== 6. ЗАПУСК БОТА ====================
-async function startBot() {
-  console.log('🤖 Запускаю бота...');
+// ЭКСПОРТ функции-обработчика для Vercel
+module.exports = async (req, res) => {
+  // 1. Проверяем, что запрос от Telegram (необязательно, но рекомендуется)
+  // if (req.method !== 'POST') return res.status(405).send('Method Not Allowed');
   
-  const googleConnected = await initializeBot();
-  
-  if (!googleConnected) {
-    console.error('❌ Бот запущен БЕЗ подключения к Google Таблицам!');
-    console.error('Логирование работать не будет, но бот будет отвечать.');
+  try {
+    // 2. Парсим тело запроса (обновление от Telegram)
+    const update = req.body;
+    
+    // 3. Передаем обновление боту на обработку
+    await bot.processUpdate(update);
+    
+    // 4. Отвечаем Telegram, что всё OK
+    res.status(200).json({ ok: true });
+  } catch (error) {
+    console.error('Ошибка в обработке запроса:', error);
+    res.status(500).json({ error: 'Internal Server Error' });
   }
-  
-  console.log('==========================================');
-  console.log('✅ Бот запущен!');
-  console.log('📱 Откройте Telegram и напишите боту:');
-  console.log('   1. Команду /start');
-  console.log('   2. Любое текстовое сообщение');
-  console.log('📊 Затем проверьте Google Таблицу');
-  console.log('==========================================');
-}
-
-// Запуск
-startBot();
+};
