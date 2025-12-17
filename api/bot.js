@@ -160,36 +160,37 @@ bot.onText(/\/start/, async (msg) => {
   
   console.log(`🚀 /start: chatId=${chatId}, userName=${userName}`);
   
+  const welcomeText = `Привет, ${userName}!\n\nЭтот бот предназначен для отправки важных уведомлений и информации. Для того чтобы начать получать сообщения, пожалуйста, дайте свое согласие на рассылку.`;
+  
+  const consentKeyboard = {
+    inline_keyboard: [[{
+      text: '✅ Я соглашаюсь на получение рассылки',
+      callback_data: 'consent_given'
+    }]]
+  };
+  
   try {
-    // 1. Тестовое сообщение
-    await bot.sendMessage(chatId, `Тест: ${userName}, бот жив!`);
-    console.log('✅ Тест отправлен');
+    console.log(`📤 Пытаюсь отправить сообщение в ${chatId}...`);
     
-    // 2. Короткая задержка
-    await new Promise(resolve => setTimeout(resolve, 300));
+    // Пробуем отправить без клавиатуры
+    const testMessage = await bot.sendMessage(chatId, `Тест: ${userName}, бот жив!`);
+    console.log(`✅ Тестовое сообщение отправлено, ID: ${testMessage.message_id}`);
     
-    // 3. Основное сообщение с ПРОСТОЙ клавиатурой
-    const welcomeText = `Привет, ${userName}!\n\nДайте согласие на рассылку.`;
-    
+    // Потом с клавиатурой
     const result = await bot.sendMessage(chatId, welcomeText, {
-      reply_markup: {
-        inline_keyboard: [
-          [{ text: '✅ Соглашаюсь', callback_data: 'consent_given' }]
-        ]
-      }
+      reply_markup: consentKeyboard,
+      parse_mode: 'HTML'
     });
     
     console.log(`✅ Основное сообщение отправлено, ID: ${result.message_id}`);
     
-    // 4. Логирование
+    // Логируем
     if (sheet) {
-      await addLogToSheet(userName, chatId, '/start', 'Приветствие отправлено');
+      await addLogToSheet(userName, chatId, '/start', 'Отправлено приветствие с кнопкой согласия');
     }
   } catch (error) {
-    console.error('❌ Ошибка в /start:', error.message);
-    if (error.response) {
-      console.error('Response data:', error.response.data);
-    }
+    console.error('❌ Ошибка отправки сообщения:', error.message);
+    console.error('Детали ошибки:', error);
   }
 });
 
