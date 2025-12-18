@@ -313,20 +313,20 @@ module.exports = async (req, res) => {
     return res.status(405).json({ error: 'Method Not Allowed' });
   }
   
-  // try {
-  //   // Инициализируем Google Sheets
-  //   const googleReady = await initializeGoogleSheets();
-  //   if (!googleReady) {
-  //     console.log('⚠️  Google Sheets не доступна, бот будет работать без логирования');
-  //   }
+  try {
+    // Инициализируем Google Sheets
+    const googleReady = await initializeGoogleSheets();
+    if (!googleReady) {
+      console.log('⚠️  Google Sheets не доступна, бот будет работать без логирования');
+    }
     
-  //   // Обрабатываем обновление от Telegram
-  //   const update = req.body;
-  //   await bot.processUpdate(update);
+    // Обрабатываем обновление от Telegram
+    const update = req.body;
+    await bot.processUpdate(update);
     
-  //   return res.status(200).json({ ok: true });
-  // } catch (error) {
-  //   console.error('❌ Ошибка обработки:', error.message);
-  //   return res.status(200).json({ ok: false, error: error.message });
-  // }
+    return res.status(200).json({ ok: true });
+  } catch (error) {
+    console.error('❌ Ошибка обработки:', error.message);
+    return res.status(200).json({ ok: false, error: error.message });
+  }
 };
