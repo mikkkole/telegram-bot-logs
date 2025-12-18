@@ -279,54 +279,41 @@ bot.on('callback_query', async (callbackQuery) => {
   }
 });
 
-// ==================== 6. ОСНОВНОЙ ОБРАБОТЧИК VERCEL ====================
-module.exports = async (req, res) => {
-  console.log(`📨 ${req.method} запрос от Telegram`);
-  console.log(`📦 Body exists: ${!!req.body}`);
-  
-  // Декодируем тело запроса, если оно пришло в сыром виде
-  let update;
-  try {
-    if (typeof req.body === 'string') {
-      console.log('🔄 Тело запроса - строка, парсим JSON...');
-      update = JSON.parse(req.body);
-    } else if (req.body && typeof req.body === 'object') {
-      console.log('✅ Тело запроса уже объект');
-      update = req.body;
-    } else {
-      console.log('❌ Тело запроса пустое или в неверном формате');
-      return res.status(200).json({ ok: false, error: 'Invalid request body' });
-    }
-  } catch (error) {
-    console.error('❌ Ошибка парсинга тела запроса:', error.message);
-    return res.status(200).json({ ok: false, error: 'JSON parse error' });
-  }
-  
-  console.log(`📊 Тип обновления: ${update.message ? 'message' : update.callback_query ? 'callback' : 'unknown'}`);
+// ==================== 6. ЗАПУСК СЕРВЕРА ДЛЯ RAILWAY ====================
+// Получаем порт из переменной окружения Railway
+const PORT = process.env.PORT || 3000;
 
-  // Логируем первые 200 символов тела запроса
-  if (req.body) {
-    console.log('📋 Body preview:', JSON.stringify(req.body).substring(0, 200));
-  }
-  
-  if (req.method !== 'POST') {
-    return res.status(405).json({ error: 'Method Not Allowed' });
-  }
-  
+// Для создания сервера
+const express = require('express');
+const app = express();
+app.use(express.json()); // Для обработки JSON от Telegram
+
+// Обрабатываем все POST-запросы на корневой путь (/)
+app.post('/', async (req, res) => {
+  console.log(`📨 Получен запрос от Telegram`);
+
   try {
-    // Инициализируем Google Sheets
+    // 1. Быстро отвечаем Telegram, чтобы он не повторял запрос
+    res.status(200).json({ ok: true });
+
+    // 2. В фоне инициализируем Google Sheets и обрабатываем сообщение
     const googleReady = await initializeGoogleSheets();
     if (!googleReady) {
-      console.log('⚠️  Google Sheets не доступна, бот будет работать без логирования');
+      console.log('⚠️  Google Sheets не доступна');
     }
-    
-    // Обрабатываем обновление от Telegram
+
     const update = req.body;
     await bot.processUpdate(update);
-    
-    return res.status(200).json({ ok: true });
+    console.log('✅ Обновление обработано');
+
   } catch (error) {
-    console.error('❌ Ошибка обработки:', error.message);
-    return res.status(200).json({ ok: false, error: error.message });
+    console.error('❌ Ошибка при обработке запроса:', error.message);
+    // Ответ 200 уже отправлен, поэтому Telegram не будет повторять запрос
   }
-};
+});
+
+// Запускаем сервер
+app.listen(PORT, '0.0.0.0', () => {
+  console.log(`✅ Бот запущен на порту ${PORT}`);
+  console.log(`🔗 Вебхук нужно настроить на: https://ВАШ-ДОМЕН.up.railway.app`);
+});
