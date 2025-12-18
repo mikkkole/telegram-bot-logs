@@ -281,52 +281,47 @@ bot.on('callback_query', async (callbackQuery) => {
 
 // ==================== 6. ОСНОВНОЙ ОБРАБОТЧИК VERCEL ====================
 module.exports = async (req, res) => {
-  console.log(`📨 ${req.method} запрос от Telegram`);
-  console.log(`📦 Body exists: ${!!req.body}`);
+  // 1. НЕМЕДЛЕННО отвечаем Telegram 200 OK, чтобы он не повторял запрос
+  // Это самое важное изменение!
+  res.status(200).json({ ok: true });
   
-  // Декодируем тело запроса, если оно пришло в сыром виде
-  let update;
-  try {
-    if (typeof req.body === 'string') {
-      console.log('🔄 Тело запроса - строка, парсим JSON...');
-      update = JSON.parse(req.body);
-    } else if (req.body && typeof req.body === 'object') {
-      console.log('✅ Тело запроса уже объект');
-      update = req.body;
-    } else {
-      console.log('❌ Тело запроса пустое или в неверном формате');
-      return res.status(200).json({ ok: false, error: 'Invalid request body' });
-    }
-  } catch (error) {
-    console.error('❌ Ошибка парсинга тела запроса:', error.message);
-    return res.status(200).json({ ok: false, error: 'JSON parse error' });
+  console.log(`📨 ${req.method} запрос от Telegram. Ответ 200 отправлен.`);
+  
+  // 2. Проверяем метод и наличие тела
+  if (req.method !== 'POST' || !req.body) {
+    console.log(`⚠️  Не POST или пустое тело. Пропускаем.`);
+    return; // Ответ уже отправлен, просто выходим
   }
   
-  console.log(`📊 Тип обновления: ${update.message ? 'message' : update.callback_query ? 'callback' : 'unknown'}`);
-
-  // Логируем первые 200 символов тела запроса
-  if (req.body) {
-    console.log('📋 Body preview:', JSON.stringify(req.body).substring(0, 200));
-  }
-  
-  if (req.method !== 'POST') {
-    return res.status(405).json({ error: 'Method Not Allowed' });
-  }
-  
-  try {
-    // Инициализируем Google Sheets
-    const googleReady = await initializeGoogleSheets();
-    if (!googleReady) {
-      console.log('⚠️  Google Sheets не доступна, бот будет работать без логирования');
-    }
+  // 3. Асинхронно обрабатываем обновление БЕЗ блокировки ответа
+  (async () => {
+    let googleReady = false;
     
-    // Обрабатываем обновление от Telegram
-    const update = req.body;
-    await bot.processUpdate(update);
-    
-    return res.status(200).json({ ok: true });
-  } catch (error) {
-    console.error('❌ Ошибка обработки:', error.message);
-    return res.status(200).json({ ok: false, error: error.message });
-  }
+    try {
+      // 4. Пытаемся инициализировать Google Sheets
+      googleReady = await initializeGoogleSheets();
+      if (!googleReady) {
+        console.log('⚠️  Google Sheets не доступна, логировать не будем.');
+      }
+      
+      // 5. Обрабатываем обновление от Telegram
+      const update = req.body;
+      console.log(`📊 Тип обновления: ${update.message ? 'message' : update.callback_query ? 'callback' : 'other'}`);
+      
+      // Передаем обновление библиотеке bot.processUpdate
+      // Она сама вызовет нужный обработчик (/start, callback_query и т.д.)
+      await bot.processUpdate(update);
+      
+      console.log('✅ Обновление успешно передано на обработку.');
+      
+    } catch (error) {
+      // 6. Ловим ЛЮБУЮ ошибку, но не паникуем
+      console.error('🔴 ВНУТРЕННЯЯ ошибка при асинхронной обработке:');
+      console.error('Сообщение:', error.message);
+      if (error.stack) {
+        console.error('Стек (первые строки):', error.stack.split('\n').slice(0, 3).join('\n'));
+      }
+      // Ответ Telegram уже был 200, поэтому он не будет повторять запрос
+    }
+  })(); // Немедленно вызываем асинхронную функцию
 };
