@@ -161,14 +161,6 @@ bot.onText(/\/start/, async (msg) => {
   try {
     console.log(`📤 Пытаюсь отправить сообщение в ${chatId}...`);
     
-    // Пробуем отправить без клавиатуры
-    const testMessage = await bot.sendMessage(chatId, `Тест: ${userName}, бот жив!`);
-    await new Promise(resolve => setTimeout(resolve, 500)); // 500ms задержка
-    console.log(`Тестовое сообщение`);
-    await new Promise(resolve => setTimeout(resolve, 500)); // 500ms задержка
-    console.log(`Тестовое сообщение отправлено, ID: ${testMessage.message_id}`);
-    
-    // Потом с клавиатурой
     const result = await bot.sendMessage(chatId, welcomeText, {
       reply_markup: consentKeyboard,
       parse_mode: 'HTML'
