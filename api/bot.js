@@ -4,7 +4,6 @@ const TelegramBot = require('node-telegram-bot-api');
 const { GoogleSpreadsheet } = require('google-spreadsheet');
 
 // ==================== 2. НАСТРОЙКА БОТА ====================
-const TelegramBot = require('node-telegram-bot-api');
 const bot = new TelegramBot(process.env.BOT_TOKEN);
 
 // ==================== 3. ИНИЦИАЛИЗАЦИЯ GOOGLE SHEETS ====================
@@ -320,3 +319,25 @@ const server = app.listen(PORT, '0.0.0.0', async () => {
         console.error('❌ Не удалось установить вебхук:', error);
     }
 });
+
+// ==================== 7. SELF-PING (для поддержания активности) ====================
+function startSelfPing() {
+  // Используем публичный URL Render. Он доступен в переменной окружения.
+  const selfUrl = process.env.RENDER_EXTERNAL_URL || `https://telegram-bot-logs.onrender.com`;
+  
+  // Пингуем сами себя каждые 4 минуты (меньше 15-минутного лимита сна на Render)
+  setInterval(() => {
+    console.log('🔄 Выполняю self-ping...');
+    // Используем встроенный модуль 'https' для отправки запроса
+    require('https').get(`${selfUrl}/health`, (res) => {
+      console.log(`✅ Self-ping успешен. Статус: ${res.statusCode}`);
+    }).on('error', (err) => {
+      console.error(`❌ Ошибка self-ping: ${err.message}`);
+    });
+  }, 4 * 60 * 1000); // Интервал: 4 минуты
+}
+
+// Запускаем self-ping только в продакшн-режиме
+if (process.env.NODE_ENV === 'production') {
+  startSelfPing();
+}
