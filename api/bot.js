@@ -4,18 +4,8 @@ const TelegramBot = require('node-telegram-bot-api');
 const { GoogleSpreadsheet } = require('google-spreadsheet');
 
 // ==================== 2. НАСТРОЙКА БОТА ====================
-const bot = new TelegramBot(process.env.BOT_TOKEN, {
-  webHook: {
-    port: 443,
-    autoOpen: false
-  },
-  onlyFirstMatch: true
-});
-
-// И добавьте после создания бота:
-if (process.env.VERCEL) {
-  bot.setWebHook(`https://${process.env.VERCEL_URL}/api/bot`);
-}
+const TelegramBot = require('node-telegram-bot-api');
+const bot = new TelegramBot(process.env.BOT_TOKEN);
 
 // ==================== 3. ИНИЦИАЛИЗАЦИЯ GOOGLE SHEETS ====================
 let doc = null;
@@ -279,41 +269,54 @@ bot.on('callback_query', async (callbackQuery) => {
   }
 });
 
-// ==================== 6. ЗАПУСК СЕРВЕРА ДЛЯ RAILWAY ====================
-// Получаем порт из переменной окружения Railway
+// ==================== 6. ЗАПУСК СЕРВЕРА ДЛЯ WEBHOOK НА RENDER ====================
 const PORT = process.env.PORT || 3000;
-
-// Для создания сервера
 const express = require('express');
 const app = express();
-app.use(express.json()); // Для обработки JSON от Telegram
+app.use(express.json());
 
-// Обрабатываем все POST-запросы на корневой путь (/)
-app.post('/', async (req, res) => {
-  console.log(`📨 Получен запрос от Telegram`);
-
-  try {
-    // 1. Быстро отвечаем Telegram, чтобы он не повторял запрос
-    res.status(200).json({ ok: true });
-
-    // 2. В фоне инициализируем Google Sheets и обрабатываем сообщение
-    const googleReady = await initializeGoogleSheets();
-    if (!googleReady) {
-      console.log('⚠️  Google Sheets не доступна');
-    }
-
-    const update = req.body;
-    await bot.processUpdate(update);
-    console.log('✅ Обновление обработано');
-
-  } catch (error) {
-    console.error('❌ Ошибка при обработке запроса:', error.message);
-    // Ответ 200 уже отправлен, поэтому Telegram не будет повторять запрос
-  }
+// 1. Инициализируем Google Sheets при запуске сервера
+// Это важно для скорости первого ответа после "сна"
+let sheetsInitialized = false;
+initializeGoogleSheets().then(success => {
+    sheetsInitialized = success;
+    console.log(success ? '✅ Google Sheets готов к работе' : '⚠️ Google Sheets не инициализирован');
 });
 
-// Запускаем сервер
-app.listen(PORT, '0.0.0.0', () => {
-  console.log(`✅ Бот запущен на порту ${PORT}`);
-  console.log(`🔗 Вебхук нужно настроить на: https://ВАШ-ДОМЕН.up.railway.app`);
+// 2. Обрабатываем все POST-запросы от Telegram
+app.post('/', async (req, res) => {
+    console.log('📨 Получен запрос от Telegram');
+    
+    // Отвечаем Telegram как можно быстрее!
+    res.status(200).send('OK');
+    
+    // Обрабатываем обновление в фоне
+    try {
+        if (!sheetsInitialized) {
+            console.log('⏳ Инициализация Google Sheets по запросу...');
+            sheetsInitialized = await initializeGoogleSheets();
+        }
+        await bot.processUpdate(req.body);
+    } catch (error) {
+        console.error('❌ Ошибка обработки обновления:', error.message);
+    }
+});
+
+// 3. Обязательная проверка здоровья для Render (Health Check)
+app.get('/health', (req, res) => {
+    res.status(200).json({ status: 'ok', timestamp: new Date().toISOString() });
+});
+
+// 4. Запускаем сервер
+const server = app.listen(PORT, '0.0.0.0', async () => {
+    console.log(`✅ Сервер запущен на порту ${PORT}`);
+    
+    // 5. Устанавливаем вебхук после запуска сервера
+    const webhookUrl = `https://${process.env.RENDER_SERVICE_NAME}.onrender.com/`; // См. пункт 2 ниже
+    try {
+        await bot.setWebHook(webhookUrl);
+        console.log(`🌐 Вебхук установлен на: ${webhookUrl}`);
+    } catch (error) {
+        console.error('❌ Не удалось установить вебхук:', error);
+    }
 });
